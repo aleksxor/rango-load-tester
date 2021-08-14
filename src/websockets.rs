@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use futures_util::{future::join_all, stream::SplitStream, FutureExt, StreamExt};
+use futures_util::{future::join_all, FutureExt, StreamExt};
 use tokio::{net::TcpStream, spawn};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error};
@@ -16,8 +16,7 @@ pub async fn run(size: u32, url: url::Url) -> u32 {
 
             match connect {
                 Ok((ws_stream, _)) => {
-                    let (_, recv) = ws_stream.split();
-                    let _ = spawn(handle_message(recv, counter)).await;
+                    let _ = spawn(handle_message(ws_stream, counter)).await;
                 }
                 Err(err) => {
                     error!(?err, "Failed to connect");
@@ -33,10 +32,10 @@ pub async fn run(size: u32, url: url::Url) -> u32 {
     count
 }
 
-type RxStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+async fn handle_message(ws: WebSocketStream<MaybeTlsStream<TcpStream>>, counter: Arc<Mutex<u32>>) {
+    let (_, mut recv) = ws.split();
 
-async fn handle_message(mut rx: RxStream, counter: Arc<Mutex<u32>>) {
-    while let Some(msg) = rx.next().await {
+    while let Some(msg) = recv.next().await {
         if let Ok(data) = msg {
             if data.is_ping() {
                 continue;
