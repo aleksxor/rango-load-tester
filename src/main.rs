@@ -16,7 +16,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let url = url::Url::parse(&connect_addr).unwrap();
-    let msg_count = websockets::ws_create_connections(ws_pool_size, url).await;
+    let msg_count = websockets::run(ws_pool_size, url).await;
 
     println!("Received {} messages", msg_count);
 }
