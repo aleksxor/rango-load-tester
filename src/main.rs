@@ -1,13 +1,24 @@
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use tokio::time::sleep;
+
 mod rabbit;
 mod websockets;
 
 const WS_POOL_SIZE: u32 = 50000;
+const MSG_COUNT: u32 = 1_000_000;
+const STREAMS: &[&str] = &["public.test"];
 
 #[tokio::main]
 async fn main() {
-    let connect_addr =
-        std::env::var("WS_ADDR").unwrap_or_else(|_| "ws://localhost:8080/public".into());
-    let _rabbit_addr =
+    let msg_count = Arc::new(Mutex::new(0u32));
+    let streams = STREAMS.join(",");
+    let ws_addr = std::env::var("WS_ADDR")
+        .unwrap_or_else(|_| format!("ws://localhost:8080/?stream={}", streams));
+    let rmq_addr =
         std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://localhost:5672/%2f".into());
     let ws_pool_size = std::env::var("WS_POOL_SIZE")
         .map(|var| var.parse::<u32>().unwrap_or(WS_POOL_SIZE))
@@ -15,8 +26,12 @@ async fn main() {
 
     tracing_subscriber::fmt::init();
 
-    let url = url::Url::parse(&connect_addr).unwrap();
-    let msg_count = websockets::run(ws_pool_size, url).await;
+    let ws_url = url::Url::parse(&ws_addr).unwrap();
+    websockets::run(ws_pool_size, ws_url, Arc::clone(&msg_count)).await;
 
-    println!("Received {} messages", msg_count);
+    rabbit::rmq_listen(&rmq_addr).await;
+
+    sleep(Duration::from_secs(300)).await;
+
+    println!("Received {} messages", *msg_count.lock().unwrap());
 }
