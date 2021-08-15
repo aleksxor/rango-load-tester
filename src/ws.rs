@@ -1,9 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use futures_util::{future::join_all, FutureExt, StreamExt};
+use serde_json::from_slice;
 use tokio::{net::TcpStream, spawn};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error};
+
+use crate::rmq::{Cmd, RmqMessage};
 
 pub async fn run(size: u32, url: url::Url, msg_count: Arc<Mutex<u32>>) {
     let mut pool = vec![];
@@ -29,17 +32,26 @@ pub async fn run(size: u32, url: url::Url, msg_count: Arc<Mutex<u32>>) {
     join_all(pool).await;
 }
 
-async fn handle_message(ws: WebSocketStream<MaybeTlsStream<TcpStream>>, counter: Arc<Mutex<u32>>) {
-    let (_, mut recv) = ws.split();
-
-    while let Some(msg) = recv.next().await {
+async fn handle_message(
+    mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    counter: Arc<Mutex<u32>>,
+) {
+    while let Some(msg) = ws.next().await {
         if let Ok(data) = msg {
             if data.is_ping() {
                 continue;
             }
 
-            *counter.lock().unwrap() += 1;
-            debug!(?data, "Received ws message");
+            let data = data.into_data();
+            if let Ok(message) = from_slice::<RmqMessage>(&data) {
+                *counter.lock().unwrap() += 1;
+                debug!(?data, "Received ws message");
+
+                if message.cmd == Cmd::Close {
+                    debug!("Closing ws connection");
+                    let _ = ws.close(None).await;
+                }
+            }
         }
     }
 
