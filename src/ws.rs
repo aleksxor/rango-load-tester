@@ -12,15 +12,16 @@ use crate::{
     MsgStats,
 };
 
-pub async fn run(size: u32, url: url::Url, stream: Arc<String>, stats: &MsgStats) {
+pub async fn run(size: u32, url: &url::Url, stream: &str, stats: &MsgStats) {
     let mut pool = vec![];
 
     for i in 0..size {
         debug!("Creating client nr.: {}", i + 1);
-        let fut: _ = connect_async(&url).then(|connect| async {
+        let fut: _ = connect_async(url).then(|connect| async {
             let msg_count = Arc::clone(&stats.msg_count);
             let mean_res_time = Arc::clone(&stats.mean_res_time);
-            let stream = Arc::clone(&stream);
+            let socket_count = Arc::clone(&stats.socket_count);
+            let stream = stream.to_owned();
 
             match connect {
                 Ok((ws_stream, _)) => {
@@ -30,7 +31,7 @@ pub async fn run(size: u32, url: url::Url, stream: Arc<String>, stats: &MsgStats
                         stream,
                         msg_count,
                         mean_res_time,
-                        Arc::clone(&stats.socket_count),
+                        socket_count,
                     ));
                 }
                 Err(err) => {
@@ -47,7 +48,7 @@ pub async fn run(size: u32, url: url::Url, stream: Arc<String>, stats: &MsgStats
 
 async fn handle_message(
     mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    stream: Arc<String>,
+    stream: String,
     msg_count: Arc<Mutex<u64>>,
     mean_res_time: Arc<Mutex<f64>>,
     socket_count: Arc<Mutex<i32>>,
@@ -61,7 +62,7 @@ async fn handle_message(
             let now = Local::now().timestamp_millis();
             let data = data.into_data();
             let contents = from_slice(&data)
-                .and_then(|data: Value| from_value::<RmqMessage>(data[stream.as_ref()].to_owned()));
+                .and_then(|data: Value| from_value::<RmqMessage>(data[&stream].to_owned()));
 
             if let Ok(message) = contents {
                 debug!(?message, "Received ws message");

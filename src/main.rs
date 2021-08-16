@@ -9,7 +9,7 @@ mod rmq;
 mod ws;
 
 const WS_POOL_SIZE: u32 = 50000;
-const MSG_COUNT: u32 = 10_000;
+const MSG_COUNT: u32 = 1_000;
 
 pub struct MsgStats {
     pub msg_count: Arc<Mutex<u64>>,
@@ -25,7 +25,7 @@ async fn main() {
         mean_res_time: Arc::new(Mutex::new(0.)),
     };
 
-    let stream = Arc::new(format!("public.{}", Uuid::new_v4()));
+    let stream = format!("public.{}", Uuid::new_v4());
     let ws_addr = std::env::var("WS_ADDR")
         .unwrap_or_else(|_| format!("ws://localhost:8080/?stream={}", stream));
     let rmq_addr =
@@ -37,17 +37,12 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let ws_url = url::Url::parse(&ws_addr).unwrap();
-    ws::run(
-        ws_pool_size,
-        ws_url,
-        Arc::clone(&stream),
-        &stats,
-    )
-    .await;
+
+    ws::run(ws_pool_size, &ws_url, &stream, &stats).await;
 
     rmq::run(&rmq_addr, &stream, MSG_COUNT).await;
 
-    let mut polling_interval = tokio::time::interval(Duration::from_millis(500));
+    let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
 
     loop {
         polling_interval.tick().await;
@@ -55,6 +50,11 @@ async fn main() {
         let socket_count = *stats.socket_count.lock().unwrap();
 
         debug!("Socket count: {}", socket_count);
+        println!(
+            "Sent {} messages out of {}",
+            *stats.msg_count.lock().unwrap(),
+            MSG_COUNT * WS_POOL_SIZE
+        );
         if socket_count <= 0 {
             break;
         }
