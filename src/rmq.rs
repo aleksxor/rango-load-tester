@@ -11,13 +11,13 @@ use tokio::time::sleep;
 use tokio_amqp::LapinTokioExt;
 use tracing::{debug, error};
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Cmd {
     Test,
     Close,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RmqMessage {
     pub cmd: Cmd,
     pub time: i64,
@@ -29,7 +29,7 @@ impl RmqMessage {
     }
 }
 
-pub async fn run(url: &str, msg_count: u32) {
+pub async fn run(url: &str, stream: &str, msg_count: u32) {
     let msg_sent = RefCell::new(0u32);
     let mut retry_interval = tokio::time::interval(Duration::from_secs(5));
 
@@ -41,7 +41,7 @@ pub async fn run(url: &str, msg_count: u32) {
                 debug!("rmq connected");
                 let msg_left = msg_count - *msg_sent.borrow();
                 debug!("Sending {} messages", msg_left);
-                let _ = send_public_messages(chan, msg_left, &msg_sent).await;
+                let _ = send_public_messages(chan, stream, msg_left, &msg_sent).await;
 
                 if *msg_sent.borrow() >= msg_count {
                     debug!("Finished sending messages");
@@ -62,26 +62,29 @@ async fn init_rmq_listen(url: &str) -> Result<Channel> {
 
 pub async fn send_public_messages(
     chan: Channel,
+    stream: &str,
     to_send: u32,
     counter: &RefCell<u32>,
 ) -> Result<()> {
     for _ in 0..to_send {
-        send_message(&chan, Cmd::Test).await?;
+        send_message(&chan, stream, Cmd::Test).await?;
         *counter.borrow_mut() += 1;
 
         let _ = sleep(Duration::from_millis(30)).await;
     }
 
-    send_message(&chan, Cmd::Close).await?;
+    send_message(&chan, stream, Cmd::Close).await?;
     Ok(())
 }
 
-async fn send_message(chan: &Channel, cmd: Cmd) -> Result<()> {
+async fn send_message(chan: &Channel, stream: &str, cmd: Cmd) -> Result<()> {
     let payload = RmqMessage::new(cmd, Local::now().timestamp_millis());
+
+    debug!(?payload, "Sending rmq message");
 
     chan.basic_publish(
         "peatio.events.ranger",
-        "public.test",
+        stream,
         BasicPublishOptions::default(),
         to_vec(&payload).unwrap(),
         BasicProperties::default(),
