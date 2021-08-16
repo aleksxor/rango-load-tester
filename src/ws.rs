@@ -5,19 +5,14 @@ use futures_util::{future::join_all, FutureExt, StreamExt};
 use serde_json::{from_slice, from_value, Value};
 use tokio::{net::TcpStream, spawn};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::{
     rmq::{Cmd, RmqMessage},
     MsgStats,
 };
 
-pub async fn run<'a>(
-    size: u32,
-    url: url::Url,
-    stream: Arc<String>,
-    stats: &MsgStats,
-) {
+pub async fn run(size: u32, url: url::Url, stream: Arc<String>, stats: &MsgStats) {
     let mut pool = vec![];
 
     for i in 0..size {
@@ -78,9 +73,13 @@ async fn handle_message(
                         let mean = *mean_res_time.lock().unwrap();
                         let new_mean = (mean * msgs + (diff as f64)) / (msgs + 1.);
 
-                        debug!(
+                        trace!(
                             "now: {}, msg_ts: {}, diff is {}, mean is: {}, new mean = {}",
-                            now, message.time, diff, mean, new_mean
+                            now,
+                            message.time,
+                            diff,
+                            mean,
+                            new_mean
                         );
 
                         *msg_count.lock().unwrap() += 1;
