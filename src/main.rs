@@ -2,27 +2,28 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tracing::debug;
 use uuid::Uuid;
 
 mod rmq;
 mod ws;
 
 const WS_POOL_SIZE: u32 = 50000;
-const MSG_COUNT: u32 = 1_000;
+const MSG_COUNT: u32 = 10_000;
 
 pub struct MsgStats {
-    pub msg_count: u32,
-    pub socket_count: i32,
-    pub mean_res_time: f64,
+    pub msg_count: Arc<Mutex<u64>>,
+    pub socket_count: Arc<Mutex<i32>>,
+    pub mean_res_time: Arc<Mutex<f64>>,
 }
 
 #[tokio::main]
 async fn main() {
-    let stats = Arc::new(Mutex::new(MsgStats {
-        msg_count: 0,
-        socket_count: 0,
-        mean_res_time: 0.,
-    }));
+    let stats = MsgStats {
+        msg_count: Arc::new(Mutex::new(0)),
+        socket_count: Arc::new(Mutex::new(0)),
+        mean_res_time: Arc::new(Mutex::new(0.)),
+    };
 
     let stream = Arc::new(format!("public.{}", Uuid::new_v4()));
     let ws_addr = std::env::var("WS_ADDR")
@@ -40,7 +41,7 @@ async fn main() {
         ws_pool_size,
         ws_url,
         Arc::clone(&stream),
-        Arc::clone(&stats),
+        &stats,
     )
     .await;
 
@@ -51,14 +52,17 @@ async fn main() {
     loop {
         polling_interval.tick().await;
 
-        if stats.lock().unwrap().socket_count <= 0 {
+        let socket_count = *stats.socket_count.lock().unwrap();
+
+        debug!("Socket count: {}", socket_count);
+        if socket_count <= 0 {
             break;
         }
     }
 
-    println!("Received {} messages", stats.lock().unwrap().msg_count);
+    println!("Received {} messages", *stats.msg_count.lock().unwrap());
     println!(
-        "Mean response time is {}ms",
-        stats.lock().unwrap().mean_res_time
+        "Mean delivery time is {}ms",
+        *stats.mean_res_time.lock().unwrap()
     );
 }
