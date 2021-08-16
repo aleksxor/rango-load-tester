@@ -2,7 +2,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tracing::debug;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 mod rmq;
@@ -26,8 +26,8 @@ async fn main() {
     };
 
     let stream = format!("public.{}", Uuid::new_v4());
-    let ws_addr = std::env::var("WS_ADDR")
-        .unwrap_or_else(|_| format!("ws://localhost:8080/?stream={}", stream));
+    let ws_addr = std::env::var("WS_ADDR").unwrap_or_else(|_| "ws://localhost:8080/".into());
+    let ws_addr = format!("{}?stream={}", ws_addr, stream);
     let rmq_addr =
         std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://localhost:5672/%2f".into());
     let ws_pool_size = std::env::var("WS_POOL_SIZE")
@@ -50,18 +50,18 @@ async fn main() {
         let socket_count = *stats.socket_count.lock().unwrap();
 
         debug!("Socket count: {}", socket_count);
-        println!(
+        info!(
             "Sent {} messages out of {}",
             *stats.msg_count.lock().unwrap(),
-            MSG_COUNT * WS_POOL_SIZE
+            MSG_COUNT * ws_pool_size
         );
         if socket_count <= 0 {
             break;
         }
     }
 
-    println!("Received {} messages", *stats.msg_count.lock().unwrap());
-    println!(
+    info!("Received {} messages", *stats.msg_count.lock().unwrap());
+    info!(
         "Mean delivery time is {}ms",
         *stats.mean_res_time.lock().unwrap()
     );
