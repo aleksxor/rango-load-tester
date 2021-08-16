@@ -25,7 +25,6 @@ pub async fn run(size: u32, url: &url::Url, stream: &str, stats: &MsgStats) {
 
             match connect {
                 Ok((ws_stream, _)) => {
-                    *stats.socket_count.lock().unwrap() += 1;
                     let _ = spawn(handle_message(
                         ws_stream,
                         stream,
@@ -53,6 +52,8 @@ async fn handle_message(
     mean_res_time: Arc<Mutex<f64>>,
     socket_count: Arc<Mutex<i32>>,
 ) {
+    *socket_count.lock().unwrap() += 1;
+
     while let Some(msg) = ws.next().await {
         if let Ok(data) = msg {
             if data.is_ping() {
