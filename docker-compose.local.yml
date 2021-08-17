@@ -15,8 +15,8 @@ services:
     networks:
       - network
 
-  worker1: &w
-    image: aleksxor/rango-load-tester
+  worker:
+    build: .
     environment:
       WS_POOL_SIZE: ${WS_POOL_SIZE:-20000}
       MSG_COUNT: ${MSG_COUNT:-1000}
@@ -31,15 +31,6 @@ services:
         condition: service_healthy
     networks:
       - network
-
-  worker2:
-    <<: *w
-  worker3:
-    <<: *w
-  worker4:
-    <<: *w
-  worker5:
-    <<: *w
 
 networks:
   network: {}
