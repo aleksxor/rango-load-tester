@@ -87,12 +87,11 @@ async fn handle_message(
 
                     match message.cmd {
                         Cmd::Test => {
-                            *msg_count.lock().unwrap() += 1;
-                            *mean_res_time.lock().unwrap() = calc_new_mean(
-                                message,
-                                *msg_count.lock().unwrap(),
-                                *mean_res_time.lock().unwrap(),
-                            );
+                            let mut mean = mean_res_time.lock().unwrap();
+                            let mut count = msg_count.lock().unwrap();
+
+                            *mean = calc_new_mean(message, *count, *mean);
+                            *count += 1;
                         }
                         Cmd::Close => {
                             debug!("Closing ws connection");
