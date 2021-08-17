@@ -3,13 +3,13 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tracing::{debug, info};
+use tracing::info;
 use uuid::Uuid;
 
 mod rmq;
 mod ws;
 
-const WS_POOL_SIZE: u32 = 50000;
+const WS_POOL_SIZE: u32 = 20_000;
 const MSG_COUNT: u32 = 1_000;
 const MSG_DELAY: u32 = 30;
 
@@ -27,6 +27,11 @@ async fn main() {
         mean_res_time: Arc::new(Mutex::new(0.)),
     };
 
+    std::env::set_var(
+        "RUST_LOG",
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned()),
+    );
+
     let stream = format!("public.{}", Uuid::new_v4());
     let ws_addr = std::env::var("WS_ADDR").unwrap_or_else(|_| "ws://localhost:8080/".into());
     let ws_addr = format!("{}?stream={}", ws_addr, stream);
@@ -40,7 +45,7 @@ async fn main() {
 
     tracing_subscriber::fmt::init();
 
-    debug!(
+    info!(
         "ws_pool_size: {}, msg_count: {}, msg_delay: {}",
         ws_pool_size, msg_count, msg_delay
     );
@@ -49,7 +54,8 @@ async fn main() {
 
     ws::run(ws_pool_size, &ws_url, &stream, &stats).await;
 
-    let rmq = rmq::run(
+    let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
+    let rmq_connect = rmq::run(
         &rmq_addr,
         rmq::RmqConfig {
             stream: &stream,
@@ -57,10 +63,7 @@ async fn main() {
             msg_delay,
         },
     );
-
-    let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
-
-    let iterate = async {
+    let rmq_iterate = async {
         loop {
             polling_interval.tick().await;
 
@@ -78,7 +81,7 @@ async fn main() {
         }
     };
 
-    join(iterate, rmq).await;
+    join(rmq_connect, rmq_iterate).await;
 
     info!("Received {} messages", *stats.msg_count.lock().unwrap());
     info!(
