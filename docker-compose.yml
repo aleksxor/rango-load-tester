@@ -15,7 +15,7 @@ services:
     networks:
       - network
 
-  worker1:
+  worker1: &w
     image: aleksxor/rango-load-tester
     environment:
       WS_POOL_SIZE: 20000
@@ -30,60 +30,13 @@ services:
       - network
 
   worker2:
-    image: aleksxor/rango-load-tester
-    environment:
-      WS_POOL_SIZE: 20000
-      WS_ADDR: ws://host.docker.internal:8080/
-      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - network
-
+    <<: *w
   worker3:
-    image: aleksxor/rango-load-tester
-    environment:
-      WS_POOL_SIZE: 20000
-      WS_ADDR: ws://host.docker.internal:8080/
-      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - network
-
+    <<: *w
   worker4:
-    image: aleksxor/rango-load-tester
-    environment:
-      WS_POOL_SIZE: 20000
-      WS_ADDR: ws://host.docker.internal:8080/
-      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - network
-
+    <<: *w
   worker5:
-    image: aleksxor/rango-load-tester
-    environment:
-      WS_POOL_SIZE: 20000
-      WS_ADDR: ws://host.docker.internal:8080/
-      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - network
+    <<: *w
 
 networks:
   network: {}
