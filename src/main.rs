@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tracing::info;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 mod rmq;
@@ -11,6 +11,7 @@ mod ws;
 
 const WS_POOL_SIZE: u32 = 50000;
 const MSG_COUNT: u32 = 1_000;
+const MSG_DELAY: u32 = 30;
 
 pub struct MsgStats {
     pub msg_count: Arc<Mutex<u64>>,
@@ -29,19 +30,33 @@ async fn main() {
     let stream = format!("public.{}", Uuid::new_v4());
     let ws_addr = std::env::var("WS_ADDR").unwrap_or_else(|_| "ws://localhost:8080/".into());
     let ws_addr = format!("{}?stream={}", ws_addr, stream);
+
     let rmq_addr =
         std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://localhost:5672/%2f".into());
-    let ws_pool_size = std::env::var("WS_POOL_SIZE")
-        .map(|var| var.parse::<u32>().unwrap_or(WS_POOL_SIZE))
-        .unwrap_or(WS_POOL_SIZE);
+
+    let ws_pool_size = parse_env_u32("WS_POOL_SIZE", WS_POOL_SIZE);
+    let msg_count = parse_env_u32("MSG_COUNT", MSG_COUNT);
+    let msg_delay = parse_env_u32("MSG_DELAY", MSG_DELAY);
 
     tracing_subscriber::fmt::init();
+
+    debug!(
+        "ws_pool_size: {}, msg_count: {}, msg_delay: {}",
+        ws_pool_size, msg_count, msg_delay
+    );
 
     let ws_url = url::Url::parse(&ws_addr).unwrap();
 
     ws::run(ws_pool_size, &ws_url, &stream, &stats).await;
 
-    let rmq = rmq::run(&rmq_addr, &stream, MSG_COUNT);
+    let rmq = rmq::run(
+        &rmq_addr,
+        rmq::RmqConfig {
+            stream: &stream,
+            msg_count,
+            msg_delay,
+        },
+    );
 
     let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
 
@@ -70,4 +85,10 @@ async fn main() {
         "Mean delivery time is {}ms",
         *stats.mean_res_time.lock().unwrap()
     );
+}
+
+fn parse_env_u32(env: &str, default: u32) -> u32 {
+    std::env::var(env)
+        .map(|var| var.parse::<u32>().unwrap_or(default))
+        .unwrap_or(default)
 }

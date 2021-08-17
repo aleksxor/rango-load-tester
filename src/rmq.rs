@@ -10,6 +10,12 @@ use serde_json::to_vec;
 use tokio_amqp::LapinTokioExt;
 use tracing::{debug, error, info};
 
+pub struct RmqConfig<'a> {
+    pub stream: &'a str,
+    pub msg_count: u32,
+    pub msg_delay: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Cmd {
     Test,
@@ -28,7 +34,7 @@ impl RmqMessage {
     }
 }
 
-pub async fn run(url: &str, stream: &str, msg_count: u32) {
+pub async fn run(url: &str, config: RmqConfig<'_>) {
     let msg_sent = RefCell::new(0u32);
     let mut retry_interval = tokio::time::interval(Duration::from_secs(5));
 
@@ -38,11 +44,11 @@ pub async fn run(url: &str, stream: &str, msg_count: u32) {
         match init_rmq_listen(url).await {
             Ok(chan) => {
                 info!("rmq connected");
-                let msg_left = msg_count - *msg_sent.borrow();
+                let msg_left = config.msg_count - *msg_sent.borrow();
                 info!("Sending {} messages", msg_left);
-                let _ = send_public_messages(chan, stream, msg_left, &msg_sent).await;
+                let _ = send_public_messages(chan, &config, msg_left, &msg_sent).await;
 
-                if *msg_sent.borrow() >= msg_count {
+                if *msg_sent.borrow() >= config.msg_count {
                     info!("Finished sending messages");
                     break;
                 }
@@ -61,20 +67,27 @@ async fn init_rmq_listen(url: &str) -> Result<Channel> {
 
 pub async fn send_public_messages(
     chan: Channel,
-    stream: &str,
+    config: &RmqConfig<'_>,
     to_send: u32,
     counter: &RefCell<u32>,
 ) -> Result<()> {
-    let mut timeout_interval = tokio::time::interval(Duration::from_millis(30));
+    let mut timeout_interval = match config.msg_delay {
+        0 => None,
+        _ => Some(tokio::time::interval(Duration::from_millis(
+            config.msg_delay as u64,
+        ))),
+    };
 
     for _ in 0..to_send {
-        timeout_interval.tick().await;
+        if let Some(ref mut interval) = timeout_interval {
+            interval.tick().await;
+        }
 
-        send_message(&chan, stream, Cmd::Test).await?;
+        send_message(&chan, config.stream, Cmd::Test).await?;
         *counter.borrow_mut() += 1;
     }
 
-    send_message(&chan, stream, Cmd::Close).await?;
+    send_message(&chan, config.stream, Cmd::Close).await?;
     Ok(())
 }
 
