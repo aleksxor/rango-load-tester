@@ -7,9 +7,8 @@ use lapin::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::to_vec;
-use tokio::time::sleep;
 use tokio_amqp::LapinTokioExt;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Cmd {
@@ -35,16 +34,16 @@ pub async fn run(url: &str, stream: &str, msg_count: u32) {
 
     loop {
         retry_interval.tick().await;
-        debug!("Connecting rqm...");
+        info!("Connecting rqm to {}...", url);
         match init_rmq_listen(url).await {
             Ok(chan) => {
-                debug!("rmq connected");
+                info!("rmq connected");
                 let msg_left = msg_count - *msg_sent.borrow();
-                debug!("Sending {} messages", msg_left);
+                info!("Sending {} messages", msg_left);
                 let _ = send_public_messages(chan, stream, msg_left, &msg_sent).await;
 
                 if *msg_sent.borrow() >= msg_count {
-                    debug!("Finished sending messages");
+                    info!("Finished sending messages");
                     break;
                 }
             }
@@ -66,11 +65,13 @@ pub async fn send_public_messages(
     to_send: u32,
     counter: &RefCell<u32>,
 ) -> Result<()> {
+    let mut timeout_interval = tokio::time::interval(Duration::from_millis(30));
+
     for _ in 0..to_send {
+        timeout_interval.tick().await;
+
         send_message(&chan, stream, Cmd::Test).await?;
         *counter.borrow_mut() += 1;
-
-        let _ = sleep(Duration::from_millis(30)).await;
     }
 
     send_message(&chan, stream, Cmd::Close).await?;

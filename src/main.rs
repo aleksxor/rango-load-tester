@@ -1,8 +1,9 @@
+use futures_util::future::join;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tracing::{debug, info};
+use tracing::info;
 use uuid::Uuid;
 
 mod rmq;
@@ -40,25 +41,29 @@ async fn main() {
 
     ws::run(ws_pool_size, &ws_url, &stream, &stats).await;
 
-    rmq::run(&rmq_addr, &stream, MSG_COUNT).await;
+    let rmq = rmq::run(&rmq_addr, &stream, MSG_COUNT);
 
     let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
 
-    loop {
-        polling_interval.tick().await;
+    let iterate = async {
+        loop {
+            polling_interval.tick().await;
 
-        let socket_count = *stats.socket_count.lock().unwrap();
+            let socket_count = *stats.socket_count.lock().unwrap();
 
-        debug!("Socket count: {}", socket_count);
-        info!(
-            "Sent {} messages out of {}",
-            *stats.msg_count.lock().unwrap(),
-            MSG_COUNT * ws_pool_size
-        );
-        if socket_count <= 0 {
-            break;
+            info!("Socket count: {}", socket_count);
+            info!(
+                "Received {} messages out of {}",
+                *stats.msg_count.lock().unwrap(),
+                MSG_COUNT * ws_pool_size
+            );
+            if socket_count <= 0 {
+                break;
+            }
         }
-    }
+    };
+
+    join(iterate, rmq).await;
 
     info!("Received {} messages", *stats.msg_count.lock().unwrap());
     info!(

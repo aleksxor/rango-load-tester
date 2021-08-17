@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use chrono::offset::Local;
 use futures_util::{future::join_all, FutureExt, StreamExt};
-use serde_json::{from_slice, from_value, Value};
+use serde::Deserialize;
+use serde_json::{from_slice, from_value, Error, Value};
 use tokio::{net::TcpStream, spawn};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, trace};
@@ -11,6 +12,22 @@ use crate::{
     rmq::{Cmd, RmqMessage},
     MsgStats,
 };
+
+#[derive(Deserialize, Debug)]
+struct SubscribeSuccess {
+    message: String,
+    streams: Vec<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct SubscribeMessage {
+    success: SubscribeSuccess,
+}
+
+enum WsMsg {
+    RmqMsg(RmqMessage),
+    SubscribeMsg(SubscribeMessage),
+}
 
 pub async fn run(size: u32, url: &url::Url, stream: &str, stats: &MsgStats) {
     let mut pool = vec![];
@@ -60,42 +77,65 @@ async fn handle_message(
                 continue;
             }
 
-            let now = Local::now().timestamp_millis();
-            let data = data.into_data();
-            let contents = from_slice(&data)
-                .and_then(|data: Value| from_value::<RmqMessage>(data[&stream].to_owned()));
+            if data.is_close() {
+                break;
+            }
 
-            if let Ok(message) = contents {
-                debug!(?message, "Received ws message");
+            match parse_message(data.into_data(), &stream) {
+                Ok(WsMsg::RmqMsg(message)) => {
+                    debug!(?message, "Received ws message");
 
-                match message.cmd {
-                    Cmd::Test => {
-                        let diff = now - message.time;
-                        let msgs = *msg_count.lock().unwrap() as f64;
-                        let mean = *mean_res_time.lock().unwrap();
-                        let new_mean = (mean * msgs + (diff as f64)) / (msgs + 1.);
-
-                        trace!(
-                            "now: {}, msg_ts: {}, diff is {}, mean is: {}, new mean = {}",
-                            now,
-                            message.time,
-                            diff,
-                            mean,
-                            new_mean
-                        );
-
-                        *msg_count.lock().unwrap() += 1;
-                        *mean_res_time.lock().unwrap() = new_mean;
-                    }
-                    Cmd::Close => {
-                        debug!("Closing ws connection");
-                        break;
+                    match message.cmd {
+                        Cmd::Test => {
+                            *msg_count.lock().unwrap() += 1;
+                            *mean_res_time.lock().unwrap() = calc_new_mean(
+                                message,
+                                *msg_count.lock().unwrap(),
+                                *mean_res_time.lock().unwrap(),
+                            );
+                        }
+                        Cmd::Close => {
+                            debug!("Closing ws connection");
+                            break;
+                        }
+                    };
+                }
+                Ok(WsMsg::SubscribeMsg(message)) => {
+                    if message.success.message.eq("subscribed") {
+                        debug!(?message, "Subscribed");
                     }
                 }
-            }
+                _ => (),
+            };
         }
     }
 
     *socket_count.lock().unwrap() -= 1;
     debug!("Connection closed")
+}
+
+fn calc_new_mean(message: RmqMessage, msg_count: u64, old_mean: f64) -> f64 {
+    let now = Local::now().timestamp_millis();
+    let diff = now - message.time;
+    let new_mean = (old_mean * msg_count as f64 + (diff as f64)) / (msg_count as f64 + 1.);
+
+    trace!(
+        "now: {}, msg_ts: {}, diff is {}, old mean is: {}, new mean = {}",
+        now,
+        message.time,
+        diff,
+        old_mean,
+        new_mean
+    );
+
+    new_mean
+}
+
+fn parse_message(data: Vec<u8>, stream: &str) -> Result<WsMsg, Error> {
+    from_slice(&data).and_then(|parsed: Value| {
+        let rmq_msg = from_value::<RmqMessage>(parsed[stream].to_owned()).map(WsMsg::RmqMsg);
+        let sub_msg = from_value::<SubscribeMessage>(parsed).map(WsMsg::SubscribeMsg);
+
+        rmq_msg.or(sub_msg)
+    })
 }
