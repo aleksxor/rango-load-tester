@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.9-management-alpine
+    container_name: rabbitmq
+    ports:
+      - 5672:5672
+      - 15672:15672
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 5s
+      timeout: 15s
+      retries: 5
+    networks:
+      - network
+
+  worker1:
+    image: aleksxor/rango-load-tester
+    environment:
+      WS_POOL_SIZE: 20000
+      WS_ADDR: ws://host.docker.internal:8080/
+      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - network
+
+  worker2:
+    image: aleksxor/rango-load-tester
+    environment:
+      WS_POOL_SIZE: 20000
+      WS_ADDR: ws://host.docker.internal:8080/
+      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - network
+
+  worker3:
+    image: aleksxor/rango-load-tester
+    environment:
+      WS_POOL_SIZE: 20000
+      WS_ADDR: ws://host.docker.internal:8080/
+      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - network
+
+  worker4:
+    image: aleksxor/rango-load-tester
+    environment:
+      WS_POOL_SIZE: 20000
+      WS_ADDR: ws://host.docker.internal:8080/
+      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - network
+
+  worker5:
+    image: aleksxor/rango-load-tester
+    environment:
+      WS_POOL_SIZE: 20000
+      WS_ADDR: ws://host.docker.internal:8080/
+      AMQP_ADDR: amqp://guest:guest@rabbitmq:5672/%2f
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - network
+
+networks:
+  network: {}
