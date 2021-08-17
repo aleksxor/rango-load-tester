@@ -1,7 +1,7 @@
 FROM ekidd/rust-musl-builder:stable as builder
 
-RUN user=root cargo new --bin stress-ws
-WORKDIR ./stress-ws
+RUN user=root cargo new --bin rango-load-tester
+WORKDIR ./rango-load-tester
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 RUN cargo build --release
@@ -9,7 +9,7 @@ RUN rm src/*.rs
 
 ADD --chown=rust:rust . ./
 
-RUN rm ./target/x86_64-unknown-linux-musl/release/deps/stress_ws*
+RUN rm ./target/x86_64-unknown-linux-musl/release/deps/rango_load_tester*
 RUN cargo build --release
 
 FROM alpine:latest
@@ -23,11 +23,11 @@ RUN addgroup -S $APP_USER \
     && adduser -S -g $APP_USER $APP_USER
 
 RUN apk update \
-    && apk add --no-cache ca-certificates tzdata upx \
+    && apk add --no-cache upx \
     && rm -rf /var/cache/apk/*
 
-COPY --from=builder /home/rust/src/stress-ws/target/x86_64-unknown-linux-musl/release/stress-ws ${APP}/stress-ws
-RUN upx ${APP}/stress-ws
+COPY --from=builder /home/rust/src/rango-load-tester/target/x86_64-unknown-linux-musl/release/rango-load-tester ${APP}/rango-load-tester
+RUN upx ${APP}/rango-load-tester
 
 RUN chown -R $APP_USER:$APP_USER ${APP}
 
@@ -39,4 +39,4 @@ ENV RUST_LOG info
 USER $APP_USER
 WORKDIR ${APP}
 
-CMD ["./stress-ws"]
+CMD ["./rango-load-tester"]
