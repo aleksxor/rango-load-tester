@@ -49,3 +49,26 @@ Has the same preconditions as the local containerized version.
 ``` sh
 docker-compose up
 ```
+
+## Measurements
+
+#### 100k clients, 1000 messages. Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz, 32Gb RAM, NVMe SSD
+_rango server and clients running on the same machine_
+
+``` text
+worker2_1   | INFO rango_load_tester: Received 20000000 messages
+worker2_1   | INFO rango_load_tester: Mean delivery time is 163193.80485250262ms
+...
+worker5_1   | INFO rango_load_tester: Received 20000000 messages
+worker5_1   | INFO rango_load_tester: Mean delivery time is 168410.05409856033ms
+...
+worker4_1   | INFO rango_load_tester: Received 20000000 messages
+worker4_1   | INFO rango_load_tester: Mean delivery time is 172133.4831429799ms
+...
+worker1_1   | INFO rango_load_tester: Received 20000000 messages
+worker1_1   | INFO rango_load_tester: Mean delivery time is 179832.35141856552ms
+...
+worker3_1   | INFO rango_load_tester: Received 20000000 messages
+worker3_1   | INFO rango_load_tester: Mean delivery time is 192133.97007096457ms
+```
+
