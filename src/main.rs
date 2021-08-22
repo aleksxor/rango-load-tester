@@ -13,67 +13,97 @@ const WS_POOL_SIZE: u32 = 20_000;
 const MSG_COUNT: u32 = 1_000;
 const MSG_DELAY: u32 = 30;
 
+#[derive(Debug)]
 pub struct MsgStats {
     pub msg_count: Arc<Mutex<u64>>,
     pub socket_count: Arc<Mutex<i32>>,
     pub mean_res_time: Arc<Mutex<f64>>,
 }
 
+impl MsgStats {
+    pub fn new() -> Self {
+        MsgStats {
+            msg_count: Arc::new(Mutex::new(0)),
+            socket_count: Arc::new(Mutex::new(0)),
+            mean_res_time: Arc::new(Mutex::new(0.)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum State {
+    Initial,
+    RmqConnected,
+    WsConnected,
+    Finished,
+}
+
+#[derive(Debug)]
+pub struct Config {
+    pub stream: String,
+    pub rmq_addr: String,
+    pub ws_addr: String,
+    pub ws_pool_size: u32,
+    pub msg_delay: u32,
+    pub msg_count: u32,
+    pub stats: MsgStats,
+    pub state: State,
+}
+
+impl Config {
+    pub fn new() -> Self {
+        let stream = format!("public.{}", Uuid::new_v4());
+        let ws_addr = std::env::var("WS_ADDR").unwrap_or_else(|_| "ws://localhost:8080/".into());
+        let ws_addr = format!("{}?stream={}", ws_addr, stream);
+
+        let rmq_addr =
+            std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://localhost:5672/%2f".into());
+
+        let ws_pool_size = parse_env_u32("WS_POOL_SIZE", WS_POOL_SIZE);
+        let msg_count = parse_env_u32("MSG_COUNT", MSG_COUNT);
+        let msg_delay = parse_env_u32("MSG_DELAY", MSG_DELAY);
+
+        Config {
+            stream,
+            rmq_addr,
+            ws_addr,
+            ws_pool_size,
+            msg_delay,
+            msg_count,
+            stats: MsgStats::new(),
+            state: State::Initial,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    let stats = MsgStats {
-        msg_count: Arc::new(Mutex::new(0)),
-        socket_count: Arc::new(Mutex::new(0)),
-        mean_res_time: Arc::new(Mutex::new(0.)),
-    };
-
     std::env::set_var(
         "RUST_LOG",
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned()),
     );
 
-    let stream = format!("public.{}", Uuid::new_v4());
-    let ws_addr = std::env::var("WS_ADDR").unwrap_or_else(|_| "ws://localhost:8080/".into());
-    let ws_addr = format!("{}?stream={}", ws_addr, stream);
-
-    let rmq_addr =
-        std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://localhost:5672/%2f".into());
-
-    let ws_pool_size = parse_env_u32("WS_POOL_SIZE", WS_POOL_SIZE);
-    let msg_count = parse_env_u32("MSG_COUNT", MSG_COUNT);
-    let msg_delay = parse_env_u32("MSG_DELAY", MSG_DELAY);
-
     tracing_subscriber::fmt::init();
 
-    info!(
-        "ws_pool_size: {}, msg_count: {}, msg_delay: {}",
-        ws_pool_size, msg_count, msg_delay
-    );
-
-    let ws_url = url::Url::parse(&ws_addr).unwrap();
-
-    ws::run(ws_pool_size, &ws_url, &stream, &stats).await;
+    let config = Config::new();
+    info!("Config: {:?}", config);
 
     let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
-    let rmq_connect = rmq::run(
-        &rmq_addr,
-        rmq::RmqConfig {
-            stream: &stream,
-            msg_count,
-            msg_delay,
-        },
-    );
+
+    ws::run(&config).await;
+
+    let rmq_connect = rmq::run(&config);
     let rmq_iterate = async {
         loop {
             polling_interval.tick().await;
 
-            let socket_count = *stats.socket_count.lock().unwrap();
+            let socket_count = *config.stats.socket_count.lock().unwrap();
 
-            info!("Socket count: {}", socket_count);
+            info!("Open sockets: {}", socket_count);
             info!(
                 "Received {} messages out of {}",
-                *stats.msg_count.lock().unwrap(),
-                MSG_COUNT * ws_pool_size
+                *config.stats.msg_count.lock().unwrap(),
+                config.msg_count * config.ws_pool_size
             );
             if socket_count <= 0 {
                 break;
@@ -83,10 +113,13 @@ async fn main() {
 
     join(rmq_connect, rmq_iterate).await;
 
-    info!("Received {} messages", *stats.msg_count.lock().unwrap());
+    info!(
+        "Received {} messages",
+        *config.stats.msg_count.lock().unwrap()
+    );
     info!(
         "Mean delivery time is {}ms",
-        *stats.mean_res_time.lock().unwrap()
+        *config.stats.mean_res_time.lock().unwrap()
     );
 }
 

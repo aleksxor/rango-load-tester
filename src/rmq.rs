@@ -10,11 +10,7 @@ use serde_json::to_vec;
 use tokio_amqp::LapinTokioExt;
 use tracing::{debug, error, info};
 
-pub struct RmqConfig<'a> {
-    pub stream: &'a str,
-    pub msg_count: u32,
-    pub msg_delay: u32,
-}
+use crate::Config;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Cmd {
@@ -34,14 +30,14 @@ impl RmqMessage {
     }
 }
 
-pub async fn run(url: &str, config: RmqConfig<'_>) {
+pub async fn run(config: &Config) {
     let msg_sent = RefCell::new(0u32);
     let mut retry_interval = tokio::time::interval(Duration::from_secs(5));
 
     loop {
         retry_interval.tick().await;
-        info!("Connecting rqm to {}...", url);
-        match init_rmq_listen(url).await {
+        info!("Connecting rqm to {}...", config.rmq_addr);
+        match init_rmq_listen(&config.rmq_addr).await {
             Ok(chan) => {
                 info!("rmq connected");
                 let msg_left = config.msg_count - *msg_sent.borrow();
@@ -67,7 +63,7 @@ async fn init_rmq_listen(url: &str) -> Result<Channel> {
 
 pub async fn send_public_messages(
     chan: Channel,
-    config: &RmqConfig<'_>,
+    config: &Config,
     to_send: u32,
     counter: &RefCell<u32>,
 ) -> Result<()> {
@@ -83,11 +79,11 @@ pub async fn send_public_messages(
             interval.tick().await;
         }
 
-        send_message(&chan, config.stream, Cmd::Test).await?;
+        send_message(&chan, &config.stream, Cmd::Test).await?;
         *counter.borrow_mut() += 1;
     }
 
-    send_message(&chan, config.stream, Cmd::Close).await?;
+    send_message(&chan, &config.stream, Cmd::Close).await?;
     Ok(())
 }
 

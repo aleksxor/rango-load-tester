@@ -10,7 +10,7 @@ use tracing::{debug, error, trace};
 
 use crate::{
     rmq::{Cmd, RmqMessage},
-    MsgStats,
+    Config,
 };
 
 #[derive(Deserialize, Debug)]
@@ -29,22 +29,21 @@ enum WsMsg {
     SubscribeMsg(SubscribeMessage),
 }
 
-pub async fn run(size: u32, url: &url::Url, stream: &str, stats: &MsgStats) {
+pub async fn run(config: &Config) {
     let mut pool = vec![];
 
-    for i in 0..size {
+    for i in 0..config.ws_pool_size {
         debug!("Creating client nr.: {}", i + 1);
-        let fut: _ = connect_async(url).then(|connect| async {
-            let msg_count = Arc::clone(&stats.msg_count);
-            let mean_res_time = Arc::clone(&stats.mean_res_time);
-            let socket_count = Arc::clone(&stats.socket_count);
-            let stream = stream.to_owned();
+        let fut: _ = connect_async(&config.ws_addr).then(|connect| async {
+            let msg_count = Arc::clone(&config.stats.msg_count);
+            let mean_res_time = Arc::clone(&config.stats.mean_res_time);
+            let socket_count = Arc::clone(&config.stats.socket_count);
 
             match connect {
                 Ok((ws_stream, _)) => {
                     let _ = spawn(handle_message(
                         ws_stream,
-                        stream,
+                        config.stream.clone(),
                         msg_count,
                         mean_res_time,
                         socket_count,
