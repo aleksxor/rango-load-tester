@@ -18,7 +18,7 @@ Notice that `MSG_COUNT` is the number of messages to be sent. As each sent messa
 
 #### Binary
 
-**precondition**: rabbitmq server and rango should be both up and running before executing the tester. 
+**prerequisites**: rango should be up and running before executing the tester. As the tester ignores any websocket connection errors and will start sending messages right away after connecting to the rabbitmq server.
 
 ``` sh
 # build the binary
@@ -34,7 +34,7 @@ Keep in mind that total number of clients is limited to the number of available 
 
 Builds and runs current directory inside a docker container. RabbitMQ server is provided along inside the docker container.
 
-**precondition**: rango should be running before executing the command. Local version of the rabbitmq server should not be running on ports 5672, 15672. Otherwise the port collision will prevent the containerized rabbitmq server to start.
+**prerequisites**: rango should be running before executing the command. Local version of the rabbitmq server should not be running on ports 5672, 15672. Otherwise the port collision will prevent the containerized rabbitmq server to start.
 
 ``` sh
 docker-compose -f docker-compose.local.yml up

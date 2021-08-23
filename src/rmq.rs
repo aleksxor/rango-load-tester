@@ -1,4 +1,4 @@
-use std::{cell::RefCell, time::Duration};
+use std::time::Duration;
 
 use chrono::offset::Local;
 use lapin::{
@@ -31,7 +31,7 @@ impl RmqMessage {
 }
 
 pub async fn run(config: &Config) {
-    let msg_sent = RefCell::new(0u32);
+    let mut msg_sent = 0u32;
     let mut retry_interval = tokio::time::interval(Duration::from_secs(5));
 
     loop {
@@ -39,12 +39,16 @@ pub async fn run(config: &Config) {
         info!("Connecting rqm to {}...", config.rmq_addr);
         match init_rmq_listen(&config.rmq_addr).await {
             Ok(chan) => {
-                info!("rmq connected");
-                let msg_left = config.msg_count - *msg_sent.borrow();
-                info!("Sending {} messages", msg_left);
-                let _ = send_public_messages(chan, &config, msg_left, &msg_sent).await;
+                config.rmq_connected();
 
-                if *msg_sent.borrow() >= config.msg_count {
+                info!("rmq connected");
+
+                let msg_left = config.msg_count - msg_sent;
+                config.wait_for_ws().await;
+                info!("Sending {} messages", msg_left);
+                let _ = send_public_messages(chan, &config, msg_left, &mut msg_sent).await;
+
+                if msg_sent >= config.msg_count {
                     info!("Finished sending messages");
                     break;
                 }
@@ -65,7 +69,7 @@ pub async fn send_public_messages(
     chan: Channel,
     config: &Config,
     to_send: u32,
-    counter: &RefCell<u32>,
+    counter: &mut u32,
 ) -> Result<()> {
     let mut timeout_interval = match config.msg_delay {
         0 => None,
@@ -80,7 +84,7 @@ pub async fn send_public_messages(
         }
 
         send_message(&chan, &config.stream, Cmd::Test).await?;
-        *counter.borrow_mut() += 1;
+        *counter += 1;
     }
 
     send_message(&chan, &config.stream, Cmd::Close).await?;

@@ -1,5 +1,6 @@
-use futures_util::future::join;
+use futures_util::future::join3;
 use std::{
+    cell::RefCell,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -30,7 +31,7 @@ impl MsgStats {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum State {
     Initial,
     RmqConnected,
@@ -47,7 +48,7 @@ pub struct Config {
     pub msg_delay: u32,
     pub msg_count: u32,
     pub stats: MsgStats,
-    pub state: State,
+    state: RefCell<State>,
 }
 
 impl Config {
@@ -71,8 +72,40 @@ impl Config {
             msg_delay,
             msg_count,
             stats: MsgStats::new(),
-            state: State::Initial,
+            state: RefCell::new(State::Initial),
         }
+    }
+
+    pub fn rmq_connected(&self) {
+        if *self.state.borrow() == State::Initial {
+            *self.state.borrow_mut() = State::RmqConnected;
+        }
+    }
+
+    pub fn ws_connected(&self) {
+        if *self.state.borrow() == State::RmqConnected {
+            *self.state.borrow_mut() = State::WsConnected;
+        }
+    }
+
+    async fn wait_for_state(&self, state: State, millis: u64) {
+        let mut polling_interval = tokio::time::interval(Duration::from_millis(millis));
+
+        loop {
+            polling_interval.tick().await;
+
+            if *self.state.borrow() == state {
+                break;
+            }
+        }
+    }
+
+    pub async fn wait_for_rmq(&self) {
+        self.wait_for_state(State::RmqConnected, 300).await;
+    }
+
+    pub async fn wait_for_ws(&self) {
+        self.wait_for_state(State::WsConnected, 300).await;
     }
 }
 
@@ -88,12 +121,22 @@ async fn main() {
     let config = Config::new();
     info!("Config: {:?}", config);
 
-    let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
-
-    ws::run(&config).await;
+    let total_msgs = config.msg_count as u64 * config.ws_pool_size as u64;
 
     let rmq_connect = rmq::run(&config);
+    let ws_connect = async {
+        config.wait_for_rmq().await;
+        ws::run(&config).await;
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        config.ws_connected();
+    };
+
     let rmq_iterate = async {
+        config.wait_for_rmq().await;
+
+        let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
+
         loop {
             polling_interval.tick().await;
 
@@ -103,15 +146,16 @@ async fn main() {
             info!(
                 "Received {} messages out of {}",
                 *config.stats.msg_count.lock().unwrap(),
-                config.msg_count * config.ws_pool_size
+                total_msgs
             );
-            if socket_count <= 0 {
+
+            if *config.state.borrow() == State::WsConnected && socket_count <= 0 {
                 break;
             }
         }
     };
 
-    join(rmq_connect, rmq_iterate).await;
+    join3(rmq_connect, ws_connect, rmq_iterate).await;
 
     info!(
         "Received {} messages",
