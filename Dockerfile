@@ -1,6 +1,8 @@
 FROM ekidd/rust-musl-builder:stable as builder
 
-RUN user=root cargo new --bin rango-load-tester
+USER root
+
+RUN cargo new --bin rango-load-tester
 WORKDIR ./rango-load-tester
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
