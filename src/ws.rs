@@ -41,7 +41,7 @@ pub async fn run(config: &Config) {
 
             match connect {
                 Ok((ws_stream, _)) => {
-                    let _ = spawn(handle_message(
+                    spawn(handle_message(
                         ws_stream,
                         config.stream.clone(),
                         msg_count,

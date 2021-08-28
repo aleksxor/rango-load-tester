@@ -1,113 +1,12 @@
-use futures_util::future::join3;
-use std::{
-    cell::RefCell,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tracing::info;
-use uuid::Uuid;
+use futures_util::future::join;
+use std::time::Duration;
+use tracing::{error, info};
 
+use crate::config::Config;
+
+mod config;
 mod rmq;
 mod ws;
-
-const WS_POOL_SIZE: u32 = 20_000;
-const MSG_COUNT: u32 = 1_000;
-const MSG_DELAY: u32 = 30;
-
-#[derive(Debug)]
-pub struct MsgStats {
-    pub msg_count: Arc<Mutex<u64>>,
-    pub socket_count: Arc<Mutex<i32>>,
-    pub mean_res_time: Arc<Mutex<f64>>,
-}
-
-impl MsgStats {
-    pub fn new() -> Self {
-        MsgStats {
-            msg_count: Arc::new(Mutex::new(0)),
-            socket_count: Arc::new(Mutex::new(0)),
-            mean_res_time: Arc::new(Mutex::new(0.)),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum State {
-    Initial,
-    RmqConnected,
-    WsConnected,
-    Finished,
-}
-
-#[derive(Debug)]
-pub struct Config {
-    pub stream: String,
-    pub rmq_addr: String,
-    pub ws_addr: String,
-    pub ws_pool_size: u32,
-    pub msg_delay: u32,
-    pub msg_count: u32,
-    pub stats: MsgStats,
-    state: RefCell<State>,
-}
-
-impl Config {
-    pub fn new() -> Self {
-        let stream = format!("public.{}", Uuid::new_v4());
-        let ws_addr = std::env::var("WS_ADDR").unwrap_or_else(|_| "ws://localhost:8080/".into());
-        let ws_addr = format!("{}?stream={}", ws_addr, stream);
-
-        let rmq_addr =
-            std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://localhost:5672/%2f".into());
-
-        let ws_pool_size = parse_env_u32("WS_POOL_SIZE", WS_POOL_SIZE);
-        let msg_count = parse_env_u32("MSG_COUNT", MSG_COUNT);
-        let msg_delay = parse_env_u32("MSG_DELAY", MSG_DELAY);
-
-        Config {
-            stream,
-            rmq_addr,
-            ws_addr,
-            ws_pool_size,
-            msg_delay,
-            msg_count,
-            stats: MsgStats::new(),
-            state: RefCell::new(State::Initial),
-        }
-    }
-
-    pub fn rmq_connected(&self) {
-        if *self.state.borrow() == State::Initial {
-            *self.state.borrow_mut() = State::RmqConnected;
-        }
-    }
-
-    pub fn ws_connected(&self) {
-        if *self.state.borrow() == State::RmqConnected {
-            *self.state.borrow_mut() = State::WsConnected;
-        }
-    }
-
-    async fn wait_for_state(&self, state: State, millis: u64) {
-        let mut polling_interval = tokio::time::interval(Duration::from_millis(millis));
-
-        loop {
-            polling_interval.tick().await;
-
-            if *self.state.borrow() == state {
-                break;
-            }
-        }
-    }
-
-    pub async fn wait_for_rmq(&self) {
-        self.wait_for_state(State::RmqConnected, 300).await;
-    }
-
-    pub async fn wait_for_ws(&self) {
-        self.wait_for_state(State::WsConnected, 300).await;
-    }
-}
 
 #[tokio::main]
 async fn main() {
@@ -123,20 +22,39 @@ async fn main() {
 
     let total_msgs = config.msg_count as u64 * config.ws_pool_size as u64;
 
-    let rmq_connect = rmq::run(&config);
-    let ws_connect = async {
-        config.wait_for_rmq().await;
-        ws::run(&config).await;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let main_worker = async {
+        let mut chan = rmq::rmq_connect(&config.rmq_addr).await;
+        info!("rmq connected");
 
         tokio::time::sleep(Duration::from_secs(3)).await;
-        config.ws_connected();
+        ws::run(&config).await;
+        info!("websockets connected");
+        tx.send(()).unwrap();
+
+        let mut msg_sent = 0;
+
+        loop {
+            let to_send = config.msg_count - msg_sent;
+            info!("start sending {} messages", to_send);
+            match rmq::send_public_messages(chan, &config, to_send, &mut msg_sent).await {
+                Err(err) => {
+                    error!(?err, "Failed to send a message: ");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    chan = rmq::rmq_connect(&config.rmq_addr).await;
+                }
+                Ok(()) => {
+                    info!("Finished sending messages.");
+                    break;
+                }
+            }
+        }
     };
 
-    let rmq_iterate = async {
-        config.wait_for_rmq().await;
+    let watch = async {
+        rx.await.unwrap();
 
         let mut polling_interval = tokio::time::interval(Duration::from_secs(5));
-
         loop {
             polling_interval.tick().await;
 
@@ -149,13 +67,13 @@ async fn main() {
                 total_msgs
             );
 
-            if *config.state.borrow() == State::WsConnected && socket_count <= 0 {
+            if socket_count <= 0 {
                 break;
             }
         }
     };
 
-    join3(rmq_connect, ws_connect, rmq_iterate).await;
+    join(main_worker, watch).await;
 
     info!(
         "Received {} messages",
@@ -165,10 +83,4 @@ async fn main() {
         "Mean delivery time is {}ms",
         *config.stats.mean_res_time.lock().unwrap()
     );
-}
-
-fn parse_env_u32(env: &str, default: u32) -> u32 {
-    std::env::var(env)
-        .map(|var| var.parse::<u32>().unwrap_or(default))
-        .unwrap_or(default)
 }
