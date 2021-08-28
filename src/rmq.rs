@@ -40,11 +40,10 @@ pub async fn run(config: &Config) {
         match init_rmq_listen(&config.rmq_addr).await {
             Ok(chan) => {
                 config.rmq_connected();
-
                 info!("rmq connected");
 
-                let msg_left = config.msg_count - msg_sent;
                 config.wait_for_ws().await;
+                let msg_left = config.msg_count - msg_sent;
                 info!("Sending {} messages", msg_left);
                 let _ = send_public_messages(chan, &config, msg_left, &mut msg_sent).await;
 
