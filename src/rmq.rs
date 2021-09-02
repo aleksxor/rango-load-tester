@@ -1,16 +1,15 @@
 use std::time::Duration;
 
+use crate::Config;
 use chrono::offset::Local;
 use lapin::{
-    options::BasicPublishOptions, BasicProperties, Channel, Connection, ConnectionProperties,
-    Result,
+    options::{BasicPublishOptions, ConfirmSelectOptions},
+    BasicProperties, Channel, Connection, ConnectionProperties, Result,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::to_vec;
 use tokio_amqp::LapinTokioExt;
-use tracing::{debug, error, info};
-
-use crate::Config;
+use tracing::{debug, error};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Cmd {
@@ -30,37 +29,28 @@ impl RmqMessage {
     }
 }
 
-pub async fn run(config: &Config) {
-    let mut msg_sent = 0u32;
-    let mut retry_interval = tokio::time::interval(Duration::from_secs(5));
+pub async fn rmq_connect(url: &str) -> Channel {
+    let mut polling_interval = tokio::time::interval(Duration::from_secs(3));
 
     loop {
-        retry_interval.tick().await;
-        info!("Connecting rqm to {}...", config.rmq_addr);
-        match init_rmq_listen(&config.rmq_addr).await {
-            Ok(chan) => {
-                config.rmq_connected();
+        polling_interval.tick().await;
 
-                info!("rmq connected");
-
-                let msg_left = config.msg_count - msg_sent;
-                config.wait_for_ws().await;
-                info!("Sending {} messages", msg_left);
-                let _ = send_public_messages(chan, &config, msg_left, &mut msg_sent).await;
-
-                if msg_sent >= config.msg_count {
-                    info!("Finished sending messages");
-                    break;
-                }
+        match rmq_get_channel(url).await {
+            Ok(chan) => return chan,
+            Err(err) => {
+                error!(?err, "Failed to connect: ");
+                continue;
             }
-            Err(err) => error!(?err, "rmq connection failed"),
         }
     }
 }
 
-async fn init_rmq_listen(url: &str) -> Result<Channel> {
+async fn rmq_get_channel(url: &str) -> Result<Channel> {
     let conn = Connection::connect(url, ConnectionProperties::default().with_tokio()).await?;
     let channel = conn.create_channel().await?;
+    channel
+        .confirm_select(ConfirmSelectOptions { nowait: false })
+        .await?;
 
     Ok(channel)
 }
